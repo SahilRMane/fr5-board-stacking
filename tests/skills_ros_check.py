@@ -304,7 +304,9 @@ try:
         if phase == "HOVER" and lost["proc"] is None:   # TM-38: the real injection tool, its own process
             lost["proc"] = subprocess.Popen([sys.executable, os.path.join(HERE, "..", "tools", "inject_vacuum_loss.py"),
                                              "1.0"], stdout=inj_log, stderr=subprocess.STDOUT)
-    r2 = run("place", Place.Goal(target="drop_off_a"), hook=lose)
+    # DDS discovery can delay the separate injector until descent. Keep the entire
+    # destination on the input table; a drop inside a zone correctly stays a zone board.
+    r2 = run("place", Place.Goal(x=-0.15, y=-0.50, yaw=1.5708), hook=lose)
     tr = tfb.lookup_transform("base_link", "tcp", rclpy.time.Time()).transform.translation
     drop_xy = (tr.x, tr.y)
     rc = lost["proc"].wait(timeout=15) if lost["proc"] else None
