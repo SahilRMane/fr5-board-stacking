@@ -11,6 +11,7 @@ import os
 import sys
 import time
 from collections import deque
+from pathlib import Path
 
 # one thread per core in numpy (OpenBLAS) / OpenCV spun ~9 cores at 5 Hz on small matrices: cap before importing
 for _v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
@@ -29,6 +30,7 @@ cv2.setNumThreads(2)
 sys.path.insert(0, os.path.dirname(__file__))
 from detect import detect, draw  # noqa: E402
 import table  # noqa: E402
+import seg  # noqa: E402
 
 DEST_MEMORY = 60.0  # s a destination tag stays valid after it was last seen (templates are fixed; the arm covers them
                     # >10 s while placing, real robot 2026-10-27)
@@ -70,9 +72,24 @@ class Vision1(Node):
         super().__init__("vision1_overhead")
         device = str(self.declare_parameter("device", "C920", ParameterDescriptor(dynamic_typing=True)).value)
         rate = float(self.declare_parameter("rate", 5.0).value)
+        if not math.isfinite(rate) or rate <= 0:
+            raise ValueError('Camera rate must be finite and positive')
         self.use_model = bool(self.declare_parameter("model", False).value)  # learned segmenter (stacks, UNKWN)
+        self.backend = str(self.declare_parameter('backend', 'yolo26',
+            ParameterDescriptor(read_only=True)).value)
+        seg.configure(self.backend)
+        if self.use_model:
+            seg._session()  # Validate weights before opening a camera or advertising readiness.
+        time.sleep(1.5)  # DDS discovery; reject another source before taking camera ownership.
+        if self.count_publishers('/vision/boards'):
+            raise RuntimeError('another node already publishes /vision/boards: stop it first (two sources would mix)')
         focus = int(self.declare_parameter("focus", 15).value)  # fixed focus as in the team calibration; -1 = leave as is
-        self.still = cv2.imread(device) if os.path.isfile(device) else None
+        is_file = os.path.isfile(device)
+        if not is_file and (os.path.sep in device or Path(device).suffix.lower() in ('.png','.jpg','.jpeg','.bmp')):
+            raise FileNotFoundError('Replay image missing: '+device)
+        self.still = cv2.imread(device) if is_file else None
+        if is_file and self.still is None:
+            raise ValueError('Replay image cannot be decoded: '+device)
         self.focus, self.fails = focus, 0
         if self.still is None:
             self.open_camera(device)
@@ -81,14 +98,13 @@ class Vision1(Node):
         except (OSError, ValueError) as e:
             self.calib = None
             self.get_logger().warn(f"no calibration ({e}): publishing pixels only")
+        if self.still is not None and self.calib and list(self.still.shape[1::-1]) != self.calib['image_size']:
+            raise ValueError('Replay image resolution does not match calibration')
         self.last = "{}"
         self.dest, self.zones = {}, {}  # tag memory: by variant (pick_one.py), by zone name (main controller)
-        self.create_service(Trigger, "/vision/detect", self.snapshot)
-        time.sleep(1.5)  # DDS discovery
-        if self.count_publishers("/vision/boards"):
-            raise RuntimeError("another node already publishes /vision/boards: stop it first (two sources would mix)")
         self.device = device
         self.pub = self.create_publisher(String, "/vision/boards", 10)
+        self.create_service(Trigger, '/vision/detect', self.snapshot)
         self.markers = self.create_publisher(MarkerArray, "/vision/markers", 10)  # RViz: Add -> By topic
         self.image = self.create_publisher(Image, "/vision/image", 2)  # annotated camera view, half size (RViz Image)
         self.create_timer(1.0 / rate, self.tick)
@@ -125,7 +141,10 @@ class Vision1(Node):
     def tick(self):
         if self.still is not None:  # replay: re-read so a test can swap the file (scene changed)
             frame = cv2.imread(self.device)
-            frame = self.still if frame is None else frame
+            if frame is None:
+                self.get_logger().error('Replay image unavailable; refusing to refresh cached observations',
+                                        throttle_duration_sec=2.0)
+                return False
             stamp = time.time()
         else:
             ok, frame = self.cap.read()
@@ -143,6 +162,9 @@ class Vision1(Node):
             stamp = time.time()  # capture time (C9): detection below takes up to ~1 s on the CPU
             self.fails = 0
         rejected, tags, occluded = [], [], []
+        if self.calib and list(frame.shape[1::-1]) != self.calib['image_size']:
+            self.get_logger().error('Image resolution changed; refusing invalid calibration',throttle_duration_sec=2.)
+            return False
         boards = detect(frame, rejected, tags, use_model=self.use_model)
         if self.calib is not None:
             boards = table.pickable(self.calib, boards, rejected, occluded)
@@ -162,8 +184,10 @@ class Vision1(Node):
         zones = sorted((dict(z, yaw=round((z["yaw"] + math.pi / 2) % math.pi - math.pi / 2, 4))
                         for z in recall(self.zones, now)), key=lambda z: z["name"])
         msg = {"stamp": now, "destinations": dests, "zones": zones, "image_size": [frame.shape[1], frame.shape[0]],
-               "source": self.device, "live": self.still is None, "calibrated": self.calib is not None, "boards": boards, "occluded": occluded, "rejected": rejected}
-        self.last = json.dumps(msg)
+               "source": self.device, "live": self.still is None, "calibrated": self.calib is not None,
+               "perception_backend": self.backend if self.use_model else 'classical',
+               "boards": boards, "occluded": occluded, "rejected": rejected}
+        self.last = json.dumps(msg,allow_nan=False)
         img = self.annotate(frame, boards, occluded, rejected, tags)
         if time.time() - getattr(self, "saved", 0) > 2.0:  # debug overlay for the lab, every 2 s
             self.saved = time.time()

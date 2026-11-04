@@ -20,6 +20,121 @@ Gemma proposes commands. Fixed code validates them before the controller accepts
 
 **One Pixi workspace. Local models. One terminal to start the stack.**
 
+This fork builds on the team's `feat/infra-final-integration` branch. It adds a
+startup selection between the original **YOLO26s** and our trained **YOLO11s**.
+Both feed the same calibrated Vision 1, world model, task state machines, and
+motion interfaces. YOLO26 remains the default. Changes are published in this
+fork; the teammate's repository is unchanged.
+
+## Get this complete version
+
+Use **Linux x86-64 (Ubuntu 24.04 or newer)** with a working NVIDIA driver supporting
+CUDA 12.9 and at least 8 GB of GPU memory for the complete local-model stack.
+Install [Pixi](https://pixi.sh) and Git first. Allow roughly 30 GB of free disk
+space for environments, caches, and model downloads. Initial setup needs internet
+access; the two trained vision models are already included in Git.
+
+```bash
+git clone --branch feat/perception-dual-yolo --recurse-submodules \
+  https://github.com/SahilRMane/fr5-board-stacking.git
+cd fr5-board-stacking
+pixi install --locked -a
+pixi run build
+pixi run -e models prepare-models
+pixi run up --sim --no-gui
+```
+
+Open [localhost:8088](http://localhost:8088) after **All started**. The preparation
+command downloads the pinned conversation models before launch, so the first
+several-GB download does not hit the launcher's readiness timeout. It also checks
+that speech recognition and English/German speech synthesis can load.
+
+Phonon requires approved Hugging Face access. By default, the speech service
+prefers Phonon and explicitly reports a **Piper** fallback if Phonon is unavailable.
+Piper uses public pinned English/German voices and works offline after preparation.
+The model-service health response identifies the active voice backend. To choose
+explicitly, set `WORKCELL_TTS=piper` or `WORKCELL_TTS=phonon`; strict Phonon mode
+fails if access is unavailable. No Hugging Face token is required for Piper.
+
+## Choose YOLO26 or YOLO11s
+
+| Model | Camera startup option | Input | Classes |
+|---|---|---|---|
+| Original YOLO26s (default) | `--perception yolo26` | One crop per table | VARa, VARb, VARc |
+| Our trained YOLO11s | `--perception yolo11` | One full overhead image | VARa, VARb, VARc; hands excluded from board output |
+
+After completing the real-robot setup and calibration checks in the
+[operations guide](docs/OPERATIONS.md#6-start-on-the-real-robot), choose one:
+
+```bash
+pixi run up --perception yolo26
+# OR, after stopping the previous run:
+pixi run up --perception yolo11
+```
+
+These two commands use real hardware. For robot-free operation, use `--sim`.
+**Simulation uses synthetic board observations**, so choosing a model with
+`--sim` does not by itself test that model. To exercise both actual models without
+a camera or robot:
+
+```bash
+pixi run python tests/perception_models_check.py
+ROS_DOMAIN_ID=169 ROS_LOCALHOST_ONLY=1 pixi run python tests/perception_ros_check.py
+```
+
+To view either actual model on an included lab image, start only its vision node:
+
+```bash
+pixi run vision-yolo26 -p device:=samples/01.jpg
+# OR, after Ctrl+C:
+pixi run vision-yolo11 -p device:=samples/01.jpg
+```
+
+Both publish `/vision/boards` and provide `/vision/detect`. The board packet reports
+`perception_backend`; the board positions, zones, units, and downstream interfaces
+are shared. Stop the current stack before switching; changes during an active
+pick are not supported. Duplicate vision publishers are rejected.
+
+Model files and SHA256 checksums are listed in
+[`config/perception_models.json`](config/perception_models.json). A missing,
+corrupt, wrongly labelled, or incompatible selected model causes startup to fail;
+it does not silently select the other model or classical detection. The YOLO11s
+export preserves checkpoint SHA256
+`67ee9c19255eea65462b4289ebb6b8f3cf0f88347ff5325e5dded77a3da64a58` and uses
+Ultralytics 8.3.228, ONNX 1.19.1, opset 17, and a 960-pixel input.
+
+These models still make detection errors, particularly with overlapping boards.
+Neither hand predictions nor a supported outline certify human safety or a unique
+topmost board. The supplied calibration belongs to the original lab camera pose;
+recalibrate and supervise acceptance tests on a different physical workcell.
+
+## Verify the installation
+
+```bash
+pixi run test                   # offline logic, real-model decoding, malformed-data checks
+pixi run test all               # also isolated ROS, simulated motion, gripper and full controller suites
+pixi run -e models python tests/voice_fallback_check.py
+```
+
+For complete web/text/voice integration, start `pixi run up --sim` first, then run
+the following in a second terminal in the same ROS domain:
+
+```bash
+ROS_LOCALHOST_ONLY=1 pixi run python conversation/demo_check.py
+```
+
+For browser checks while the simulation is running:
+
+```bash
+pixi run npm --prefix web exec -- playwright install chromium
+pixi run node web/tests/browser.mjs
+pixi run node web/tests/responsive.mjs
+pixi run python web/tests/gateway.py
+```
+
+Tests use Playwright's installed Chromium by default; optionally set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` to an existing compatible Chrome binary.
+
 ## Start in simulation
 
 **No robot or cameras required.** Use the checkout that contains this README.
@@ -32,6 +147,7 @@ If this checkout is already installed and built, go to step 2.
 ```bash
 pixi install --locked -a
 pixi run build
+pixi run -e models prepare-models
 ```
 
 **Needs:** Linux x86-64, an NVIDIA GPU with 8 GB or more, and a driver that supports CUDA 12.9.
@@ -133,7 +249,7 @@ Use the web app shown above. This image documents the earlier camera and robot i
 1. **You request a job.** Parakeet turns speech into text. Typed requests enter as text.
 2. **Gemma proposes commands.** A fixed grammar checks them. Direct control commands bypass planning.
 3. **Vision supplies observations.** Calibration and tracking give the controller board and zone positions.
-4. **The controller executes skills.** MoveIt and the gripper interfaces handle motion and suction. Phonon provides spoken replies.
+4. **The controller executes skills.** MoveIt and the gripper interfaces handle motion and suction. Phonon, or the explicitly reported Piper fallback, provides spoken replies.
 
 The language model has no direct motion access.
 Read the [ROS interfaces](docs/OPERATIONS.md#13-ros-interfaces) for topic, service and action names.
@@ -153,12 +269,15 @@ Read the [ROS interfaces](docs/OPERATIONS.md#13-ros-interfaces) for topic, servi
 
 ## Tested status
 
-**Integration checks from 28 October 2026.** Results describe the local checkout.
+**Integration checks from 4 November 2026.** Results describe this fork's tested code.
 
 | Check | Result | What the result covers |
 |---|---|---|
 | End-to-end demo | **13 / 13 passed** | Simulated robot, text planning, real local speech models, pause/resume, stop/cancel and request rejection |
-| Launcher lifecycle | **6 / 6 passed** | Local process fixtures: startup, failure cleanup, signals, duplicate starts, restart and shutdown ownership |
+| Launcher lifecycle | **7 / 7 passed** | Startup, failure cleanup, signals, duplicate starts, restart, shutdown ownership and forwarding either model selection |
+| Real vision models | **2 / 2 passed** | Saved images through each actual model, calibrated ROS output and world tracking; no physical robot |
+| Perception failure cases | **16 tests passed** | Includes malformed types, invalid calibration, missing/corrupt weights, hand exclusion, invalid outputs and geometry |
+| Voice fallback | **3 / 3 passed** | Gated-model fallback, strict selection errors and real English/German Piper audio |
 | Offline suites | **Passed** | Controller logic, recorded vision samples, command grammar and conversation tests |
 | Full-stack shutdown | **No session processes remained** | Simulation started and stopped without tmux |
 

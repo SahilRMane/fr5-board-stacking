@@ -138,7 +138,8 @@ class Stack:
                 sock.bind(("127.0.0.1", port))
         if not (self.root / "web/.local/server.crt").exists():
             subprocess.run([sys.executable, "web/setup_tls.py"], cwd=self.root, env=self.env, check=True)
-        print(f"Starting stack. Logs: {self.log}", flush=True)
+        print(f"Starting stack. Logs: {self.log}\nCamera perception: {self.args.perception}"
+              + (' (simulation uses synthetic observations)' if self.args.sim else ''), flush=True)
         self.start("monitor", sys.executable, "tools/live_monitor.py", *(["--lite"] if self.args.mode == "demo" else []))
         self.start("llm", "pixi", "run", "--locked", "-e", "models", "llm")
         self.start("motion", "ros2", "launch", "hk_fr5_moveit_config", "bringup.launch.py",
@@ -148,7 +149,8 @@ class Stack:
         if self.args.sim:
             self.start("fake", "ros2", "run", "hk_fr5_task", "fake_world", *node_args, "-p", "contact_sim:=true")
         else:
-            self.start("vision", sys.executable, "vision1/node.py", "--ros-args", "-p", "model:=true")
+            self.start("vision", sys.executable, "vision1/node.py", "--ros-args", "-p", "model:=true",
+                       '-p', f'backend:={self.args.perception}')
             self.start("wrist", "ros2", "launch", "vision1/wrist.launch.py")
         self.wait_for("vision", 90, lambda: self.has_publisher("/vision/boards"))
         self.start("world", "ros2", "run", "hk_fr5_task", "world_model", *node_args)
@@ -222,6 +224,8 @@ def main():
     parser.add_argument("--sim", action="store_true")
     parser.add_argument("--rviz", action="store_true")
     parser.add_argument("--no-gui", action="store_true")
+    parser.add_argument('--perception', choices=('yolo26', 'yolo11'), default='yolo26',
+                        help='camera segmentation backend; simulation uses the synthetic world')
     args = parser.parse_args()
     (ROOT / "live_logs").mkdir(exist_ok=True)
     with (ROOT / "live_logs/stack.lock").open("a+") as lock:

@@ -92,12 +92,22 @@ COVER_PX = 800     # px of board j inside occluded board i's hull -> j covers i
 def _from_model(bgr, rois, tag_centres, reject):
     """Model masks -> boards. Full rectangle = on top (pickable). Partial = occluded: 'top': False, 'covered_by'."""
     out, masks = [], []
+    allowed = None
+    if seg.settings()['full_frame']:
+        allowed = np.zeros(bgr.shape[:2], np.uint8)
+        for x0, y0, x1, y1 in rois:
+            allowed[y0:y1, x0:x1] = 255
+        # YOLO11s was trained on full overhead frames, not the legacy per-table crops.
+        rois = [(0, 0, bgr.shape[1], bgr.shape[0])]
     for inst in (i for r in rois for i in seg.segment(bgr, r)):
         cs, _ = cv2.findContours(inst["mask"], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not cs:
             continue
         c = max(cs, key=cv2.contourArea)
         area = cv2.contourArea(c)
+        if allowed is not None and cv2.countNonZero(inst['mask'] & cv2.bitwise_not(allowed)):
+            reject('outside_roi', c, area)
+            continue
         if area < MIN_AREA / 4:
             continue
         rect = cv2.minAreaRect(c)
@@ -138,6 +148,9 @@ def detect(bgr, rejected=None, tags=None, use_model=False):
     tags: optional list, gets {'id','corners'} for every DICT_5X5_100 marker in the whole image (destinations).
     With use_model (needs models/boards-seg.onnx): learned masks, boards also get 'top', 'conf', and occluded ones
     'covered_by' (ids of touching boards); variant may be 'UNKWN'. Without it: classic colour masks (all 'top')."""
+    if (not isinstance(bgr,np.ndarray) or bgr.dtype != np.uint8 or bgr.ndim != 3
+            or bgr.shape[2] != 3 or min(bgr.shape[:2]) < 2):
+        raise ValueError('Expected a nonempty uint8 BGR image')
     colour = "model"
 
     def reject(reason, c, area):
@@ -154,7 +167,7 @@ def detect(bgr, rejected=None, tags=None, use_model=False):
     if tags is not None:
         tags += [{"id": i, "corners": c.tolist()} for i, c in found.items()]
 
-    if use_model and seg.available():
+    if use_model:
         return _from_model(bgr, [roi_px(w, h, r) for r in ROIS], tag_centres, reject)
     boards = []
     for colour, ranges, close in (("white", [WHITE], 9), ("red", RED, RED_CLOSE)):

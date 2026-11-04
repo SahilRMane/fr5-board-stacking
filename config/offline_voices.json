@@ -1,0 +1,8 @@
+{
+  "repository": "rhasspy/piper-voices",
+  "revision": "e7229f7d33a10e145e109b886d661984201ac3c4",
+  "voices": {
+    "en": "en/en_US/lessac/medium/en_US-lessac-medium.onnx",
+    "de": "de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx"
+  }
+}

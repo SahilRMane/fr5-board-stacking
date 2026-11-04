@@ -1,9 +1,11 @@
 import { chromium, expect } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+process.chdir(fileURLToPath(new URL("..", import.meta.url)));
 
 // Read live visuals, but intercept EVERY API write: these tests cannot command a robot.
 const browser = await chromium.launch({
-  executablePath: "/usr/bin/google-chrome",
+  executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
   headless: true,
   args: ["--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
 });

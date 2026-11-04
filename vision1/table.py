@@ -22,19 +22,37 @@ ZONE_SPLIT_Y = 0.0          # y < split -> pick (right table in image), else dro
 def load(path=CALIB):
     with open(path) as f:
         c = yaml.safe_load(f)
-    if not c.get("calibrated"):
+    if not isinstance(c,dict) or c.get("calibrated") is not True:
         raise ValueError(f"{path}: not calibrated")
-    c["hull"] = cv2.convexHull(np.array([[t["u"], t["v"]] for t in c["tags"]], np.float32))
+    try:
+        size = c['image_size']
+        matrix = np.asarray(c['homography'],dtype=float)
+        points = np.asarray([[t['u'],t['v']] for t in c['tags']],dtype=np.float32)
+        if (len(size) != 2 or any(type(v) is not int or v <= 0 for v in size)
+                or matrix.shape != (3,3) or not np.isfinite(matrix).all() or abs(np.linalg.det(matrix)) < 1e-15
+                or not math.isfinite(float(c['lens_k'])) or len(points) < 4 or not np.isfinite(points).all()):
+            raise ValueError('Invalid image dimensions, homography, lens correction or reference tags')
+        c['hull'] = cv2.convexHull(points)
+        if cv2.contourArea(c['hull']) <= 0:
+            raise ValueError('Calibration reference tags are collinear')
+        c['homography'],c['lens_k'] = matrix.tolist(),float(c['lens_k'])
+    except (KeyError,TypeError,ValueError) as error:
+        raise ValueError(f'{path}: invalid calibration: {error}') from error
     return c
 
 
 def to_base(c, px):
     """(n, 2) pixels -> (n, 2) base_link x / y in metres."""
+    px = np.asarray(px,dtype=float)
+    if px.ndim != 2 or px.shape[1] != 2 or not np.isfinite(px).all():
+        raise ValueError('Expected finite N x 2 pixel coordinates')
     size = c["image_size"]
     centre = np.array(size, float) / 2.0
     d = np.asarray(px, float) - centre
     up = centre + d * (1.0 + c["lens_k"] * np.sum((d / float(max(size))) ** 2, axis=1, keepdims=True))
     q = np.asarray(c["homography"]) @ np.vstack([up.T, np.ones(len(up))])
+    if not np.isfinite(q).all() or np.any(np.abs(q[2]) < 1e-12):
+        raise ValueError('Calibration projection is singular or non-finite')
     return (q[:2] / q[2]).T
 
 

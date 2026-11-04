@@ -1,0 +1,30 @@
+{
+  "yolo26": {
+    "path": "models/boards-seg.onnx",
+    "sha256": "ad9481ebf720a2ce49dd2e6c5e7e086d3eb418d89f3cd0405c29136d6e800abc",
+    "classes": [
+      "VARa",
+      "VARb",
+      "VARc"
+    ],
+    "confidence": 0.4,
+    "full_frame": false
+  },
+  "yolo11": {
+    "path": "models/boards-yolo11s.onnx",
+    "sha256": "f60557412d9e91d18fd926eb787659bececc878293b0af79aa1fc32ffda2ad10",
+    "classes": [
+      "VARa",
+      "VARb",
+      "VARc",
+      "hand"
+    ],
+    "confidence": 0.25,
+    "full_frame": true,
+    "source_checkpoint_sha256": "67ee9c19255eea65462b4289ebb6b8f3cf0f88347ff5325e5dded77a3da64a58",
+    "source_checkpoint_url": "https://github.com/AtharvaBhorpe/fr5-board-stacking/releases/download/perception-yolo11s-cloud-001/fr5-yolo11s-cloud-001-best.pt",
+    "export_ultralytics": "8.3.228",
+    "export_opset": 17,
+    "export_onnx": "1.19.1"
+  }
+}

@@ -135,7 +135,7 @@ if __name__ == "__main__":
         self.assertIn("Stopping monitor", log.read_text())
 
     def test_real_start_sequence_forces_simulation_isolation(self):
-        args = argparse.Namespace(sim=True, mode="debug", rviz=False, no_gui=False)
+        args = argparse.Namespace(sim=True, mode="debug", rviz=False, no_gui=False, perception='yolo26')
         with patch.dict(os.environ, ROS_LOCALHOST_ONLY="0", WORKCELL_REAL="1"):
             s = stack.Stack(self.root, args)
         self.addCleanup(s.control.close)
@@ -156,6 +156,24 @@ if __name__ == "__main__":
         self.assertEqual(s.env["ROS_LOCALHOST_ONLY"], "1")
         self.assertEqual(s.env["WORKCELL_REAL"], "0")
         self.assertIn("use_fake_hardware:=true", start.call_args_list[2].args)
+
+    def test_hardware_launch_forwards_either_camera_model_without_starting_two_sources(self):
+        for backend in ('yolo26','yolo11'):
+            args = argparse.Namespace(sim=False,mode='debug',rviz=False,no_gui=True,perception=backend)
+            s = stack.Stack(self.root,args)
+            try:
+                with patch.object(s,'start') as start,patch.object(s,'ros',return_value=(
+                        '/motion/get_state\n/task/list_jobs\nPublisher count: 1\n')), \
+                        patch.object(s,'url',return_value=True),patch('stack.socket.socket'), \
+                        patch('stack.time.sleep',side_effect=lambda _:s.request_stop()), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaises(KeyboardInterrupt):s.run()
+                calls = [c for c in start.call_args_list if c.args[0]=='vision']
+                self.assertEqual(len(calls),1)
+                self.assertIn('backend:='+backend,calls[0].args)
+                self.assertFalse(any(c.args[0]=='fake' for c in start.call_args_list))
+            finally:
+                s.control.close()
 
 
 if __name__ == "__main__":

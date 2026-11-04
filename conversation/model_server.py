@@ -10,6 +10,7 @@ First start downloads Parakeet and Phonon into the Hugging Face cache (~/.cache/
 import base64
 import io
 import json
+import os
 import re
 import threading
 import urllib.request
@@ -26,6 +27,7 @@ PHONON = "hf://gradium/phonon-40m-multilingual@1537ce46c64f42903e0d608b132ccb073
 asr, asr_error = None, None
 infer_lock, tts_lock = threading.Lock(), threading.Lock()
 tts = {}
+tts_backends = {}
 
 
 def load_asr():  # ~20 s on the GPU; typed chat works meanwhile
@@ -41,7 +43,21 @@ def load_asr():  # ~20 s on the GPU; typed chat works meanwhile
 def voice(language):
     with tts_lock:
         if language not in tts:
-            tts[language] = ptts.TTS(PHONON, lang=language, device="cpu", quant="q8")
+            engine = os.environ.get('WORKCELL_TTS','auto')
+            if engine not in ('auto','phonon','piper'):
+                raise ValueError('WORKCELL_TTS must be auto, phonon or piper')
+            try:
+                if engine == 'piper':
+                    raise OSError('Offline voice explicitly selected')
+                tts[language] = ptts.TTS(PHONON, lang=language, device="cpu", quant="q8")
+                tts_backends[language] = 'phonon'
+            except (OSError,RuntimeError) as error:
+                if engine == 'phonon':
+                    raise
+                from offline_voice import OfflineVoice
+                tts[language] = OfflineVoice(language)
+                tts_backends[language] = 'piper'
+                print(f'Voice {language}: using offline Piper ({error})',flush=True)
         return tts[language]
 
 
@@ -112,7 +128,8 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self):
-        self.reply(200, {"ready": True, "asr_ready": asr is not None, "asr_error": asr_error})
+        self.reply(200, {"ready": True, "asr_ready": asr is not None, "asr_error": asr_error,
+                         "tts_backends":dict(tts_backends)})
 
     def do_POST(self):
         try:

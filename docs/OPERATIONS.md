@@ -131,7 +131,7 @@ Do not install project packages with `apt`, `pip` or `conda`. Pixi installs all 
 ### 4.2 Get the code
 
 ```bash
-git clone --recurse-submodules https://github.com/AtharvaBhorpe/fr5-board-stacking.git
+git clone --branch feat/perception-dual-yolo --recurse-submodules https://github.com/SahilRMane/fr5-board-stacking.git
 cd fr5-board-stacking
 ```
 
@@ -206,6 +206,22 @@ pixi run -e models llm        # Gemma, port 8770
 pixi run -e models speech     # Parakeet + Phonon, port 8766
 ```
 
+### 4.8 Prepare models before the first launch
+
+```bash
+pixi run -e models prepare-models
+```
+
+This downloads the pinned Gemma, Parakeet, and speech resources and checks that
+they load. Phonon is gated; if access is unavailable, auto mode reports and uses
+the public Piper English/German voices configured in `config/offline_voices.json`.
+Set `WORKCELL_TTS=piper` to select that voice, or `WORKCELL_TTS=phonon` to require
+Phonon and fail on missing access. After preparation, `HF_HUB_OFFLINE=1` and
+`WORKCELL_TTS=piper` let the cached model processes start without network access.
+
+Both trained vision ONNX files are included in the repository. No model export,
+training, or PyTorch installation in the default ROS environment is required.
+
 ## 5. Start the simulation
 
 The simulation needs no robot and no cameras. A fake arm, a fake gripper and a fake camera (`fake_world`) replace them.
@@ -213,6 +229,11 @@ The simulation needs no robot and no cameras. A fake arm, a fake gripper and a f
 ```bash
 pixi run up --sim
 ```
+
+The optional `--perception yolo26` (default) or `--perception yolo11` selects the
+camera backend for hardware startup. `--sim` always uses synthetic observations.
+Exercise the actual two models on saved lab images with the model and ROS tests
+described in the README. Stop the stack before selecting another camera backend.
 
 The launcher starts each process in order and waits until each part is ready.
 If startup fails, the launcher stops its processes and returns a nonzero exit code.

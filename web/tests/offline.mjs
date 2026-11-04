@@ -1,7 +1,10 @@
 import { chromium, expect } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+process.chdir(fileURLToPath(new URL("..", import.meta.url)));
+await mkdir("test-results", { recursive: true });
 const browser = await chromium.launch({
-  executablePath: "/usr/bin/google-chrome",
+  executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
   headless: true,
   args: [
     "--no-sandbox",
