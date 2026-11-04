@@ -49,6 +49,40 @@ model-environment dependency is `piper-tts==1.3.0`. YOLO11s does not add PyTorch
 the ROS environment. On all six supplied lab images, YOLO26 proposals exactly
 matched the original integration branch before these changes.
 
+The exported YOLO11s model was compared with its source checkpoint on the same
+CPU backend (`rtol=0.001`, `atol=0.001`); predictions and mask prototypes passed.
+The largest CUDA-versus-CPU coordinate difference among 44 active proposals was
+0.00586 pixels at the network input; the largest class-score difference was 0.00118.
+
+## Independent clean checkout
+
+A separate clone installed both locked environments, built the ROS packages and
+production web app, and prepared the cached public voice/ASR/planner models with
+`HF_HUB_OFFLINE=1 WORKCELL_TTS=piper`.
+
+Its full `pixi run test all` run passed every suite except an existing skills
+test with timing-sensitive assumptions. Investigation found two test-harness
+problems: vacuum loss could legitimately drop a board into a zone while the test
+always expected an input-table board, and shutdown polling created a new action
+result request on every iteration. The test now uses an input-table destination
+for that recovery case and waits on one result future. The separate zone-drop
+test remains in place. No motion, recovery or shutdown implementation was changed
+to accommodate these tests.
+
+The corrected skills suite then passed twice in the clean checkout: **32 checks,
+zero failures per run**, with different drop positions and clean process exits.
+All other clean-checkout suites, including the 18-check full controller suite and
+both actual-model ROS pipelines, had already passed. The earlier failed aggregate
+run is distinguished from these successful targeted reruns; it is not reported
+as a clean aggregate pass.
+
+Finally, this clean checkout started the complete stack with cached models and
+`--sim --no-gui --perception yolo26`. The web/text/voice/controller demo passed
+**13 checks, zero failures**, including actual Parakeet transcription and Piper
+speech output. Desktop/mobile browser checks reported no page errors or overflow,
+12 robot joints, 10 meshes, the simulated camera and an active service worker.
+This is a software/simulation result, not physical hardware acceptance.
+
 Failure coverage includes unknown backend names, missing/corrupt weights, paths
 with spaces and Unicode, wrong image types/shapes, missing/undecodable images,
 changed resolution, invalid ROI coordinates, malformed model tensors, NaN/Inf,

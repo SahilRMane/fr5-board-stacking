@@ -110,6 +110,9 @@ recalibrate and supervise acceptance tests on a different physical workcell.
 
 ## Verify the installation
 
+See the [validation report](docs/DUAL_PERCEPTION_VALIDATION.md) for executed checks,
+failure scenarios and hardware limits.
+
 ```bash
 pixi run test                   # offline logic, real-model decoding, malformed-data checks
 pixi run test all               # also isolated ROS, simulated motion, gripper and full controller suites

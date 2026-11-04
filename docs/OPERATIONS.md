@@ -44,7 +44,7 @@ The launcher, `tools/stack.py`, starts and monitors them from one terminal.
 | Vision 1 (overhead camera) | `vision1/` | Finds boards and zone sheets in the image of the overhead camera. Publishes their positions on the table in metres. |
 | Vision 2 (wrist camera) | `vision1/wrist.launch.py`, `config/d405.yaml` | Starts the RealSense D405 on the wrist. The web app shows its colour image and its depth image. |
 | Main controller | `src/hk_fr5_task`, `src/hk_fr5_task_interfaces`, `tools/` | Keeps a world model of boards and zones. Runs the job queue and the skills (pick, place, home, wait). |
-| Conversation and web app | `conversation/`, `web/` | Web app for phones, tablets and the PC. Speech to text (Parakeet), text to speech (Phonon), the planner (Gemma). |
+| Conversation and web app | `conversation/`, `web/` | Web app for phones, tablets and the PC. Speech to text (Parakeet), speech output (Phonon or Piper), the planner (Gemma). |
 
 The data flows in this sequence:
 
@@ -150,7 +150,7 @@ pixi install --locked -a
 This command installs two environments:
 
 - `default`: ROS 2 Humble, MoveIt 2, the RealSense driver, OpenCV, ONNX Runtime with CUDA, Node.js.
-- `models`: PyTorch with CUDA, llama.cpp with CUDA, Transformers, Phonon.
+- `models`: PyTorch with CUDA, llama.cpp with CUDA, Transformers, Phonon and Piper.
 
 The download is about 8 GB. The two environments use about 14 GB of disk.
 
@@ -198,12 +198,13 @@ The first start downloads the models into the Hugging Face cache (`~/.cache/hugg
 | Gemma 4 E2B QAT q4_0 (GGUF) | 4.3 GB | planner, questions about the scene, spoken replies |
 | Parakeet TDT 0.6B v3 | 2.5 GB | speech to text |
 | Phonon 40M multilingual | 0.1 GB | text to speech (English and German) |
+| Piper English/German voices | downloaded as needed | public fallback when Phonon access is unavailable |
 
 To download the models before the first start, run each model process one time and stop it with Ctrl+C after it shows `READY`:
 
 ```bash
 pixi run -e models llm        # Gemma, port 8770
-pixi run -e models speech     # Parakeet + Phonon, port 8766
+pixi run -e models speech     # Parakeet + selected speech voice, port 8766
 ```
 
 ### 4.8 Prepare models before the first launch
@@ -277,7 +278,7 @@ Each process writes to `live_logs/current/processes/<name>.log`:
 | `bridge` | agent bridge (text commands in, results out) |
 | `demo-ui` | vacuum-failure page, port 8765 |
 | `llm` | Gemma on llama.cpp, port 8770 |
-| `speech` | model server: Parakeet, Phonon, port 8766 |
+| `speech` | model server: Parakeet, Phonon/Piper, port 8766 |
 | `chat` | chat bridge |
 | `web` | web gateway, ports 8088 (HTTP) and 8443 (HTTPS) |
 | `wrist` | D405 driver (real robot only) |

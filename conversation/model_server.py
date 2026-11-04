@@ -3,9 +3,9 @@
 GET  /health       ready flags for the web app
 POST /ask          question about the scene -> Gemma (llama-server, pixi run -e models llm) -> short answer
 POST /transcribe   16 kHz mono WAV from the browser -> Parakeet text
-POST /synthesize   text -> Phonon WAV (English or German); natural=true lets Gemma rephrase a robot log first
+POST /synthesize   text -> Phonon/Piper WAV (English or German); natural=true lets Gemma rephrase a robot log first
 
-First start downloads Parakeet and Phonon into the Hugging Face cache (~/.cache/huggingface); later starts are offline.
+First start downloads Parakeet and selected voice resources into the Hugging Face cache; later starts use the cache.
 """
 import base64
 import io
