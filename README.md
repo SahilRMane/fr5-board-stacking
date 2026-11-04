@@ -6,7 +6,7 @@
 
 See the table. Give a job. Follow its progress.
 
-[Start in simulation](#start-in-simulation) · [See the workcell](#see-the-workcell) · [How it works](#how-it-works) · [Tested status](#tested-status) · [Operations guide](docs/OPERATIONS.md)
+[Setup and launch](#get-this-complete-version) · [Start in simulation](#start-in-simulation) · [See the workcell](#see-the-workcell) · [How it works](#how-it-works) · [Tested status](#tested-status) · [Operations guide](docs/OPERATIONS.md)
 
 <img src="docs/images/workcell.jpg" width="100%" alt="The real Fairino FR5 workcell: robot on an aluminium rail, vacuum tool above the table, and board destination sheets marked with yellow tape." />
 
@@ -28,26 +28,213 @@ contains the complete integration; the teammate's repository is unchanged.
 
 ## Get this complete version
 
-Use **Linux x86-64 (Ubuntu 24.04 or newer)** with a working NVIDIA driver supporting
-CUDA 12.9 and at least 8 GB of GPU memory for the complete local-model stack.
-Install [Pixi](https://pixi.sh) and Git first. Allow roughly 30 GB of free disk
-space for environments, caches, and model downloads. Initial setup needs internet
-access; the two trained vision models are already included in Git.
+Follow these steps on a new device. The supported setup is **Ubuntu Linux on an
+x86-64 computer with an NVIDIA GPU**. Run project commands from the repository
+folder unless a step says otherwise.
+
+### 1. Check the computer requirements
+
+Use Ubuntu 24.04 or newer, an NVIDIA GPU with at least **8 GB VRAM**, and
+approximately **30 GB free disk space**. Internet is required for initial
+installation and model downloads.
 
 ```bash
-git clone --recurse-submodules \
-  https://github.com/SahilRMane/fr5-board-stacking.git
-cd fr5-board-stacking
-pixi install --locked -a
-pixi run build
-pixi run -e models prepare-models
-pixi run up --sim --no-gui
+nvidia-smi
 ```
 
-Open [localhost:8088](http://localhost:8088) after **All started**. The preparation
-command downloads the pinned conversation models before launch, so the first
-several-GB download does not hit the launcher's readiness timeout. It also checks
-that speech recognition and English/German speech synthesis can load.
+The installed NVIDIA driver must support **CUDA 12.9 or newer**. Pixi supplies the
+project dependencies; a separate system ROS installation is unnecessary.
+
+### 2. Install Git and Pixi
+
+```bash
+sudo apt update
+sudo apt install -y git curl openssl
+
+curl -fsSL https://pixi.sh/install.sh | sh
+```
+
+Close and reopen the terminal, then verify:
+
+```bash
+git --version
+pixi --version
+```
+
+This is the installer documented by [Pixi](https://pixi.prefix.dev/dev/installation/).
+
+### 3. Clone the repository, including the robot driver
+
+```bash
+git clone --recurse-submodules https://github.com/SahilRMane/fr5-board-stacking.git
+cd fr5-board-stacking
+git branch --show-current
+```
+
+The last command should print `main`.
+
+If you already cloned without submodules, run:
+
+```bash
+git submodule update --init --recursive
+```
+
+### 4. Install, build, and prepare the models
+
+```bash
+pixi install --locked -a
+pixi run --locked build
+
+WORKCELL_TTS=piper pixi run --locked -e models prepare-models
+```
+
+Wait for each command to finish successfully before continuing.
+
+Both vision models are included in Git. The preparation command downloads and
+checks the conversation models and speech resources. **Piper works without a
+Hugging Face token**; choosing it avoids the approval requirement of Phonon.
+Preparing the several-GB downloads before launch avoids the launcher's readiness
+timeout.
+
+### 5. Run the installation checks before starting the stack
+
+```bash
+pixi run --locked test all
+
+WORKCELL_TTS=piper pixi run --locked -e models python tests/voice_fallback_check.py
+```
+
+The full test runner includes actual-model perception tests and simulated
+robot/controller checks. Run these with the stack stopped to avoid timing
+interference.
+
+### 6. First launch the complete software pipeline in simulation
+
+No robot or cameras are required:
+
+```bash
+ROS_LOCALHOST_ONLY=1 WORKCELL_TTS=piper \
+  pixi run --locked up --sim --no-gui
+```
+
+Keep this terminal open. Wait for **All started**, then open
+**[http://localhost:8088](http://localhost:8088)**. Try this in the web chat:
+
+```text
+move the large white board to drop off a
+```
+
+To run the complete automated web/text/voice demonstration, open a second terminal
+and replace `/path/to/fr5-board-stacking` with your checkout's path:
+
+```bash
+cd /path/to/fr5-board-stacking
+
+ROS_LOCALHOST_ONLY=1 pixi run --locked python conversation/demo_check.py
+```
+
+**Simulation uses synthetic camera observations.** Adding `--perception yolo11`
+to a simulation launch does not exercise YOLO11s.
+
+To exercise either actual model without a robot, stop the simulation and run one
+saved-image command:
+
+```bash
+pixi run --locked down
+
+# Original YOLO26:
+pixi run --locked vision-yolo26 -p device:=samples/01.jpg
+```
+
+Press **Ctrl+C** before trying the other:
+
+```bash
+# Trained YOLO11s:
+pixi run --locked vision-yolo11 -p device:=samples/01.jpg
+```
+
+### 7. Prepare the physical workcell before a real-hardware launch
+
+This step requires the compatible FR5 robot, configured vacuum gripper, overhead
+**Logitech C920**, and wrist **RealSense D405**.
+
+Allow access to the D405:
+
+```bash
+sudo cp config/99-realsense-d405.rules /etc/udev/rules.d/
+sudo udevadm control --reload
+sudo udevadm trigger
+```
+
+Disconnect and reconnect the D405.
+
+For the existing lab network, connect the robot controller by Ethernet. Find the
+computer's Ethernet interface:
+
+```bash
+ip link
+```
+
+Replace `enp3s0` below with that interface name:
+
+```bash
+nmcli con add type ethernet ifname enp3s0 con-name fr5-robot \
+  ipv4.method manual ipv4.addresses 192.168.58.10/24
+
+nmcli con up fr5-robot
+ping -c 3 192.168.58.2
+```
+
+Before launching:
+
+- Verify camera calibration in `config/calib.yaml`. A changed camera position,
+  focus, or workcell requires recalibration.
+- Verify tool, table, home, and zone settings against the physical workcell.
+- Make the first supervised run at **20% speed or less**; the committed skill
+  defaults are higher. The skill speed settings are in
+  [`src/hk_fr5_task/config/skills.yaml`](src/hk_fr5_task/config/skills.yaml).
+- Follow the [real-robot startup procedure](docs/OPERATIONS.md#6-start-on-the-real-robot),
+  including automatic mode, cleared alarms, visible zone tags, and empty drop-off
+  areas.
+- Keep the suction cup empty at startup and a trained operator at the hardware
+  emergency stop.
+
+### 8. Launch the complete hardware pipeline with your chosen model
+
+These commands enable web-issued jobs on the **real robot**. Run only one.
+
+**Original YOLO26:**
+
+```bash
+WORKCELL_TTS=piper WORKCELL_REAL=1 \
+  pixi run --locked up demo --perception yolo26
+```
+
+**Trained YOLO11s:**
+
+```bash
+WORKCELL_TTS=piper WORKCELL_REAL=1 \
+  pixi run --locked up demo --perception yolo11
+```
+
+The option is spelled **`yolo11`**, even though the model is YOLO11s.
+
+Wait for **All started**, then open **http://localhost:8088**. Both selections
+launch the same downstream world model, task controller, motion services, and
+web/voice interface.
+
+To switch models, finish the current operation, ensure the cup is empty, and stop:
+
+```bash
+pixi run --locked down
+```
+
+Then launch the other command. Switching during an active pick is unsupported.
+
+For troubleshooting, run `pixi run logs` from another terminal in the same
+repository. The software has passed the documented simulation and saved-image
+tests. A new physical workcell still needs calibration and supervised hardware
+acceptance before normal operation.
 
 Phonon requires approved Hugging Face access. By default, the speech service
 prefers Phonon and explicitly reports a **Piper** fallback if Phonon is unavailable.
