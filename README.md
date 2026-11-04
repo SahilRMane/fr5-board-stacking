@@ -6,7 +6,7 @@
 
 See the table. Give a job. Follow its progress.
 
-[Setup and launch](#get-this-complete-version) · [Start in simulation](#start-in-simulation) · [See the workcell](#see-the-workcell) · [How it works](#how-it-works) · [Tested status](#tested-status) · [Operations guide](docs/OPERATIONS.md)
+[Setup and launch](#get-this-complete-version) · [Real-robot verification](#real-robot-verification-at-reduced-speed) · [Start in simulation](#start-in-simulation) · [See the workcell](#see-the-workcell) · [How it works](#how-it-works) · [Tested status](#tested-status) · [Operations guide](docs/OPERATIONS.md)
 
 <img src="docs/images/workcell.jpg" width="100%" alt="The real Fairino FR5 workcell: robot on an aluminium rail, vacuum tool above the table, and board destination sheets marked with yellow tape." />
 
@@ -203,6 +203,9 @@ Before launching:
 ### 8. Launch the complete hardware pipeline with your chosen model
 
 These commands enable web-issued jobs on the **real robot**. Run only one.
+For the first hardware run, complete the
+[reduced-speed verification procedure](#real-robot-verification-at-reduced-speed)
+before using normal-operation settings.
 
 **Original YOLO26:**
 
@@ -295,6 +298,339 @@ These models still make detection errors, particularly with overlapping boards.
 Neither hand predictions nor a supported outline certify human safety or a unique
 topmost board. The supplied calibration belongs to the original lab camera pose;
 recalibrate and supervise acceptance tests on a different physical workcell.
+
+## Real-robot verification at reduced speed
+
+Use **YOLO26 first, then repeat the same tests with YOLO11s**, starting at
+**0.10 trajectory scaling**. A trained operator must supervise, with the workcell
+safeguards active and someone at the hardware emergency stop. These instructions
+have not been executed on the physical robot; the software validation above used
+saved images and simulation.
+
+**Software speed scaling is not a safety-rated speed limit.** Have the operator
+verify the robot's emergency stop, protective stop and firmware-appropriate
+reduced-speed limits before commissioning. FAIRINO documents these as separate
+hardware safety functions: [pre-use checks](https://manual.fairino.support/latest/CobotsManual/installation.html#pre-use-evaluation)
+and [reduced-speed configuration](https://support.fairino.us/portal/en/kb/articles/speed-reduction-mode-configuration).
+
+### 1. Prepare an isolated local commissioning checkout
+
+Begin with the robot stationary, the cup empty and no active jobs. From your
+repository folder:
+
+```bash
+git status --short
+```
+
+If this shows changes, preserve them before continuing. Stop any stack in this
+checkout before updating files; shutdown switches the pumps off:
+
+```bash
+pixi run --locked down
+git switch main
+git pull --ff-only
+git submodule update --init --recursive
+git switch -c chore/robot-commissioning
+```
+
+Use the same ROS settings in **every terminal** used for this test:
+
+```bash
+export ROS_DOMAIN_ID=42
+export ROS_LOCALHOST_ONLY=1
+```
+
+Ensure no other computer, simulator or robot-control program is controlling this
+robot. These local commissioning edits do not need to be pushed to GitHub.
+
+### 2. Check the physical workcell before enabling motion
+
+Confirm mounting, tool attachment, payload/TCP settings, vacuum plumbing and
+sensor operation. Check the actual table, camera stand, home position, fault
+area and clearances against the configured collision geometry. Review
+[`config/calib.yaml`](config/calib.yaml),
+[`src/hk_fr5_task/config/skills.yaml`](src/hk_fr5_task/config/skills.yaml),
+[`src/hk_fr5_task/config/world.yaml`](src/hk_fr5_task/config/world.yaml) and
+[`src/hk_fr5_motion/config/obstacles.yaml`](src/hk_fr5_motion/config/obstacles.yaml).
+
+The supplied camera calibration applies to the original camera pose and focus.
+**Do not proceed with motion if the camera or workcell geometry has changed
+without recalibration.**
+
+Empty the drop-off zones. The controller starts its stack counts at zero after
+restarting. Start with single, flat boards rather than stacks or overlapping
+boards. Complete the network, camera-access and table setup in the
+[operations guide](docs/OPERATIONS.md#6-start-on-the-real-robot) before proceeding.
+
+### 3. Reduce all relevant skill speeds
+
+While the stack is stopped, edit `src/hk_fr5_task/config/skills.yaml` and replace
+only these values:
+
+```yaml
+speed: 0.10
+carry_speed: 0.10
+approach_speed: 0.10
+search_speed: 0.0225
+```
+
+**Leave contact-search speed at its existing lower value. Do not increase it to
+0.10.** In `src/hk_fr5_motion/config/motion.yaml`, set this existing parameter to:
+
+```yaml
+default_velocity_scaling: 0.10
+```
+
+Preserve the surrounding YAML structure. The motion default is a fallback, not a
+global cap: skills explicitly supply their own speeds. Per-goal overrides also
+do not cover every phase.
+
+Build the configuration into the installed workspace:
+
+```bash
+pixi install --locked -a
+pixi run --locked build
+WORKCELL_TTS=piper pixi run --locked -e models prepare-models
+```
+
+Verify the installed settings rather than relying only on the source files:
+
+```bash
+pixi run --locked python - <<'PY'
+from pathlib import Path
+import yaml
+from ament_index_python.packages import get_package_share_directory
+
+path = Path(get_package_share_directory("hk_fr5_task")) / "config/skills.yaml"
+c = yaml.safe_load(path.read_text())
+for key in ("speed", "carry_speed", "approach_speed"):
+    assert c[key] == 0.10, (key, c[key])
+assert 0 < c["search_speed"] <= 0.0225
+motion_path = Path(get_package_share_directory("hk_fr5_motion")) / "config/motion.yaml"
+motion = yaml.safe_load(motion_path.read_text())["/**/motion_controller"]["ros__parameters"]
+assert motion["default_velocity_scaling"] == 0.10
+print(path)
+print({k: c[k] for k in ("speed", "carry_speed", "approach_speed", "search_speed")})
+print(motion_path, "default_velocity_scaling", motion["default_velocity_scaling"])
+PY
+```
+
+The current driver streams joint positions using `ServoJ`; do not assume the
+robot UI's ordinary speed slider independently caps this control path. Have its
+applicable safety limits verified for your firmware.
+
+### 4. Verify both live-camera models with robot motion disabled
+
+Start only YOLO26's vision node:
+
+```bash
+pixi run --locked vision-yolo26
+```
+
+In another terminal with the same ROS settings:
+
+```bash
+pixi run --locked ros2 service call /vision/detect std_srvs/srv/Trigger '{}'
+```
+
+Check that the response reports `perception_backend: yolo26`, calibrated output
+and correct boards. With safe access to the stationary workcell, test each board
+type at representative positions and orientations. Compare reported positions
+against surveyed references and your cell's approved picking tolerance. Check
+empty scenes and rejected ambiguous detections too.
+
+Press **Ctrl+C**, then repeat with:
+
+```bash
+pixi run --locked vision-yolo11
+```
+
+Confirm `perception_backend: yolo11`. Stop this node before launching the full
+stack. **Do not proceed** with incorrect labels, missing zones, inaccurate
+coordinates, unstable outlines or unexplained accepted detections. The detector's
+size check alone does not establish picking accuracy.
+
+### 5. Start the full YOLO26 stack with web motion initially disabled
+
+After the operator has approved the starting posture and path, close the
+safeguarded area, select the required robot operating mode and enable the robot
+according to the cell procedure. Launch:
+
+```bash
+WORKCELL_TTS=piper WORKCELL_REAL=0 \
+  pixi run --locked up --perception yolo26 --no-gui
+```
+
+**This connects to real hardware.** `WORKCELL_REAL=0` only blocks web-issued robot
+jobs; CLI commands can still move it.
+
+Wait for **All started**, then inspect:
+
+```bash
+pixi run --locked tc status
+pixi run --locked tc world
+pixi run --locked tc list
+```
+
+Require motion and skills readiness, valid fresh vision/world data, no unexplained
+alarms and no queued jobs. Open [localhost:8088](http://localhost:8088) and confirm
+it identifies the real FR5 and shows the correct scene.
+
+### 6. Verify empty-tool motion and controls before carrying a board
+
+Only after checking the configured home pose and the entire route:
+
+```bash
+pixi run --locked tc home
+```
+
+Observe clearance, posture, smoothness and actual speed. Stop commissioning for
+unexpected movement, jerks, alarms or timeouts.
+
+On an operator-approved **empty-tool movement**, test in another terminal:
+
+```bash
+pixi run --locked tc stop
+pixi run --locked tc status
+```
+
+Confirm controlled stopping and a paused controller. Inspect the state before
+approving recovery. If the robot was already at home, a no-motion home command
+does not verify stopping; use an operator-approved empty-tool route instead of
+inventing new Cartesian targets.
+
+**Pause finishes the current skill; it does not immediately stop motion.**
+Software Stop is also not the hardware emergency stop. Do not use either as the
+safeguard permitting someone to enter the workcell. A Stop leaves the controller
+paused; recovery and resuming must be explicitly approved before further jobs.
+Resuming while holding a board can trigger fault-zone placement.
+
+### 7. Test one-board transfers and the task state machine
+
+Place one flat `VARc` board in a validated input position, with `drop_off_a` empty.
+Clear the safeguarded area and ensure the controller is no longer paused or
+halted before submitting:
+
+```bash
+pixi run --locked tc transfer VARc drop_off_a 1
+```
+
+Use the returned job ID; the following example assumes it was `j1`:
+
+```bash
+pixi run --locked tc wait j1
+pixi run --locked tc list
+pixi run --locked tc world
+```
+
+Require the correct physical board and destination, successful vacuum acquisition,
+stable carrying, correct release and an empty cup afterward. The job should report
+**DONE, delivered 1, lost 0, fault 0, skipped 0**. Repeat individually for `VARa`,
+`VARb` and `VARc`, covering both drop-off destinations and representative approved
+input positions.
+
+Next test processing with one board:
+
+```bash
+pixi run --locked tc process VARc processing_1 drop_off_a 1
+```
+
+For operator processing, use the cell's validated guarded-access procedure. Pause
+scheduling, wait for the current skill to finish and establish the required
+protective standstill **before entering**. Keep the board absent from the
+processing zone for at least two seconds before returning it.
+
+Clear the area and restore safeguards before explicitly resuming:
+
+```bash
+pixi run --locked tc resume
+```
+
+If safe operator access and recovery have not been validated, stop before this
+handover test.
+
+### 8. Verify web, planning and voice at the same reduced speed
+
+Once CLI operation passes, finish all jobs and leave the robot stationary with
+an empty cup. Stop the stack:
+
+```bash
+pixi run --locked down
+```
+
+Reset the physical test arrangement under the approved access procedure, including
+empty drop-off zones. Restart with web control enabled:
+
+```bash
+WORKCELL_TTS=piper WORKCELL_REAL=1 \
+  pixi run --locked up --perception yolo26 --no-gui
+```
+
+After **All started**, pause scheduling while idle:
+
+```bash
+pixi run --locked tc pause
+```
+
+Test a scene question and voice "status" first. Then submit **one** transfer
+request through text. Inspect its variant, destination and count:
+
+```bash
+pixi run --locked tc list
+```
+
+Only when the queued job is correct and the area is clear:
+
+```bash
+pixi run --locked tc resume
+```
+
+Repeat separately using voice, again queuing while paused and reviewing before
+resuming. Do not submit text and voice versions simultaneously.
+
+### 9. Repeat the complete sequence with YOLO11s
+
+Finish jobs, confirm the cup is empty, stop the stack and reset the physical test
+setup. Keep the reduced-speed configuration unchanged. For the initial CLI-only
+checks:
+
+```bash
+WORKCELL_TTS=piper WORKCELL_REAL=0 \
+  pixi run --locked up --perception yolo11 --no-gui
+```
+
+After those checks pass, perform the same empty-cup shutdown/reset and restart for
+web/voice testing:
+
+```bash
+WORKCELL_TTS=piper WORKCELL_REAL=1 \
+  pixi run --locked up --perception yolo11 --no-gui
+```
+
+Reconfirm the active backend and repeat the same board, destination, processing
+and control tests. Never switch models during an active job or while holding a
+board.
+
+### 10. Increase speed only after both models pass
+
+Stop with an empty cup before each configuration change. Increase the three
+skill speeds to `0.20`, rebuild, restart and repeat the acceptance tests with
+both models. Recheck the installed values against the intended stage: the
+`0.10` assertions in step 3 apply to the initial stage. The motion fallback can
+stay at `0.10`; it is not the cap on explicitly requested skill speeds.
+
+Above `0.20`, use only operator-approved increments and limits supported by
+measured clearance, stopping and gripping performance. The repository's defaults
+(`0.60` travel, `0.45` carry, `0.30` approach) are **reference settings, not
+automatically approved production speeds**. Keep contact-search speed unchanged.
+
+Record the commit, model, speed settings, calibration, tested poses, physical
+errors, stopping behavior and results before authorizing normal operation.
+
+Do not initially test vacuum-loss injection, intentional board drops, cable
+removal while carrying or human-hand obstacle detection. Keep those in simulation
+until a separate controlled physical test is approved. Physical acceptance and
+safety validation remain the trained operator's responsibility.
 
 ## Verify the installation
 
@@ -506,7 +842,7 @@ See the [full test guide](docs/OPERATIONS.md#11-tests) for ROS suites and web ch
 | You need to… | Open this |
 |---|---|
 | Install on another PC | [Installation guide](docs/OPERATIONS.md#4-install-on-a-new-workstation) |
-| Run the real workcell | [Hardware startup](docs/OPERATIONS.md#6-start-on-the-real-robot) · [Shutdown](docs/OPERATIONS.md#9-stop-the-system) |
+| Run the real workcell | [Reduced-speed verification](#real-robot-verification-at-reduced-speed) · [Hardware startup](docs/OPERATIONS.md#6-start-on-the-real-robot) · [Shutdown](docs/OPERATIONS.md#9-stop-the-system) |
 | Give jobs or connect a phone | [Web and voice commands](docs/OPERATIONS.md#7-use-the-web-app) · [CLI](docs/OPERATIONS.md#8-use-the-command-line) |
 | Fix a failed start | [Troubleshooting](docs/OPERATIONS.md#14-troubleshooting) · [Logs](docs/OPERATIONS.md#10-logs) |
 | Change or understand the system | [Configuration](docs/OPERATIONS.md#12-configuration-files) · [Design records](docs/OPERATIONS.md#16-design-records) |
