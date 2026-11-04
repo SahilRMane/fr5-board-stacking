@@ -33,7 +33,7 @@ Tests used simulation or saved lab images. No real robot was moved.
 | ROS packages and production web build | Passed |
 | Original offline and ROS suites (`pixi run test all`) | All passed |
 | Final offline runner including new model cases | All passed |
-| Launcher lifecycle and model-forwarding tests | 7 passed |
+| Launcher lifecycle, readiness and model-forwarding tests | 9 passed |
 | Additional model/data/calibration tests | 16 passed, with multiple invalid-input subcases |
 | Actual YOLO26 and YOLO11s through ROS and the world model | Both passed |
 | Full simulated web/text/voice/robot demo | 13 passed, zero failed |
@@ -95,6 +95,52 @@ ROS tests additionally verify fresh snapshot responses, board removal, refusal t
 refresh stale observations after source loss, and protection against changing a
 model during a running node. Tests execute actual model inference; the full-stack
 `--sim` demo uses synthetic observations and is reported separately.
+
+## README verification from GitHub main
+
+Another recursive GitHub clone of `main` at
+`d03e855e63ec33d65d129a52f257ea5e54a5f642` was tested on Ubuntu 24.04.5 with
+Pixi 0.83.0 and the NVIDIA hardware listed above. Both locked environments
+installed and the ROS/web build passed. Existing system prerequisites and Pixi's
+package cache were available; this was a fresh source checkout, not a new OS.
+
+Model preparation additionally used an **empty Hugging Face cache**, with implicit
+tokens disabled and no token supplied. Gemma, Parakeet and both public Piper
+voices downloaded and loaded successfully. The voice tests subsequently passed
+3/3 with model downloads disabled.
+
+The README's exact `vision-yolo26` and `vision-yolo11` saved-image commands each
+published three calibrated boards and answered a fresh snapshot request. The full
+`pixi run --locked test all` command returned **ALL PASSED**, including 84 joint
+configuration checks, 32 recovery checks, 18 full-controller checks and both
+actual-model ROS pipelines.
+
+An immediate demo run after the original launcher's **All started** message found
+a startup race: HTTP listeners were available before ASR and the web client's ROS
+subscriptions were ready. That run passed 11 checks and failed the first two.
+The correction waits for explicit ASR readiness and authenticated web state with
+fresh controller, robot and calibrated vision/world data. It does not require
+enabling real-robot web control, and it does not change motion or detector code.
+
+After this correction, all offline suites passed, the launcher suite passed 9/9,
+and the same demo started immediately after **All started** passed 13/13 without
+an added delay. Desktop/mobile rendering, six responsive viewports, authentication,
+origin checks, path traversal rejection and trusted HTTPS also passed.
+
+A second recursive GitHub clone of the correction at
+`899ac40b608bff183af9ca7d0968ca10cf048131` then independently installed both locked
+environments, built the ROS/web packages, passed every offline suite, prepared
+the cached models with downloads disabled and passed both exact README model
+launch commands again. Its immediate-start web/voice demo also passed **13/13**.
+Thus the corrected immediate-start demo passed twice, in separate checkouts.
+The first used the default simulation selector and the second used
+`--sim --perception yolo11`; simulation observations remain synthetic, while the
+separate saved-image launches and ROS tests execute the actual YOLO models.
+
+The full ROS/motion regression pass above preceded this readiness correction.
+Launcher, offline and full web/voice integration checks were rerun after it;
+detector and motion implementation files were unchanged. No real-robot launch,
+network reconfiguration or physical acceptance test was performed.
 
 ## Practical limits
 
