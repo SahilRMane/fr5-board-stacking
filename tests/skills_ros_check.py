@@ -373,7 +373,9 @@ try:
     f1 = A["home"].send_goal_async(Home.Goal()); until(lambda: f1.done(), 5)
     f2 = A["home"].send_goal_async(Home.Goal()); until(lambda: f2.done(), 5)
     check("a 2nd skill while one runs is refused (one skill at a time)", f1.result().accepted and not f2.result().accepted)
-    until(lambda: f1.result().get_result_async().done(), 30)
+    completed = f1.result().get_result_async()
+    check('accepted skill finishes before shutdown',
+          until(completed.done,30) and completed.result().result.success)
 finally:
     for k in [k for k in ("skills", "world", "fake") if k in procs] + [k for k in procs if k not in ("skills", "world", "fake")]:
         outs[k] = stop(procs[k])                     # every started process (motion last); logs in LOG_DIR/skills_check_<k>.log
