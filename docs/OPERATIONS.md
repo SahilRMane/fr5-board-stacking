@@ -131,7 +131,7 @@ Do not install project packages with `apt`, `pip` or `conda`. Pixi installs all 
 ### 4.2 Get the code
 
 ```bash
-git clone --branch feat/perception-dual-yolo --recurse-submodules https://github.com/SahilRMane/fr5-board-stacking.git
+git clone --recurse-submodules https://github.com/SahilRMane/fr5-board-stacking.git
 cd fr5-board-stacking
 ```
 

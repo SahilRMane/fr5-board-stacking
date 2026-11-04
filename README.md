@@ -23,8 +23,8 @@ Gemma proposes commands. Fixed code validates them before the controller accepts
 This fork builds on the team's `feat/infra-final-integration` branch. It adds a
 startup selection between the original **YOLO26s** and our trained **YOLO11s**.
 Both feed the same calibrated Vision 1, world model, task state machines, and
-motion interfaces. YOLO26 remains the default. Changes are published in this
-fork; the teammate's repository is unchanged.
+motion interfaces. YOLO26 remains the default. This fork's default `main` branch
+contains the complete integration; the teammate's repository is unchanged.
 
 ## Get this complete version
 
@@ -35,7 +35,7 @@ space for environments, caches, and model downloads. Initial setup needs interne
 access; the two trained vision models are already included in Git.
 
 ```bash
-git clone --branch feat/perception-dual-yolo --recurse-submodules \
+git clone --recurse-submodules \
   https://github.com/SahilRMane/fr5-board-stacking.git
 cd fr5-board-stacking
 pixi install --locked -a
