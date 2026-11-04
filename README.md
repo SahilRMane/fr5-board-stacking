@@ -117,8 +117,9 @@ ROS_LOCALHOST_ONLY=1 WORKCELL_TTS=piper \
   pixi run --locked up --sim --no-gui
 ```
 
-Keep this terminal open. Wait for **All started**, then open
-**[http://localhost:8088](http://localhost:8088)**. Try this in the web chat:
+Keep this terminal open. Wait for **All started**. The launcher waits for speech
+recognition and fresh controller, robot, and vision data before reporting this.
+Then open **[http://localhost:8088](http://localhost:8088)** and try this in the web chat:
 
 ```text
 move the large white board to drop off a
@@ -464,7 +465,7 @@ Read the [ROS interfaces](docs/OPERATIONS.md#13-ros-interfaces) for topic, servi
 | Check | Result | What the result covers |
 |---|---|---|
 | End-to-end demo | **13 / 13 passed** | Simulated robot, text planning, real local speech models, pause/resume, stop/cancel and request rejection |
-| Launcher lifecycle | **7 / 7 passed** | Startup, failure cleanup, signals, duplicate starts, restart, shutdown ownership and forwarding either model selection |
+| Launcher lifecycle | **9 / 9 passed** | Startup, readiness flags, authenticated web readiness, failure cleanup, signals, duplicate starts, restart, shutdown ownership and forwarding either model selection |
 | Real vision models | **2 / 2 passed** | Saved images through each actual model, calibrated ROS output and world tracking; no physical robot |
 | Perception failure cases | **16 tests passed** | Includes malformed types, invalid calibration, missing/corrupt weights, hand exclusion, invalid outputs and geometry |
 | Voice fallback | **3 / 3 passed** | Gated-model fallback, strict selection errors and real English/German Piper audio |

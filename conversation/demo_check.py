@@ -72,7 +72,7 @@ def queued(replies):
 spin(5, lambda: status.get("motion_ready"))
 s = api("/api/state")
 check("web: sim robot, controller ready, vision fresh, models ready",
-      s["panel"]["hardware"] == "SIMULATION" and not s["blocked"]["VARa"] and s["vision_fresh"]
+      s.get("ready") is True and s["panel"]["hardware"] == "SIMULATION" and not s["blocked"]["VARa"] and s["vision_fresh"]
       and s["model"].get("ready") and s["model"].get("asr_ready"), s["blocked"])
 
 r = say("what do you see on the table?", 30)

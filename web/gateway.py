@@ -202,6 +202,11 @@ class Workcell(Node):
         with self.lock:
             now = time.time(); fresh = now-self.vision_at <= 2 and 0 <= now-self.vision.get('stamp', 0) <= 2
             return dict(stamp=now, panel=self.panel(), joints=self.joints,
+                ready=(not controller_block(self.status, self.status_at, now) and fresh
+                       and bool(self.description) and bool(self.joints)
+                       and now-self.joints_at < 2 and 0 <= now-self.world.get('stamp', 0) < 3
+                       and self.world.get('vision_ok') is True
+                       and self.model_health.get('ready') is True and self.model_health.get('asr_ready') is True),
                 robot_fresh=now-self.joints_at < 2, vision=self.vision if fresh else {}, vision_fresh=fresh,
                 gripper=self.gripper, batch=self.batch, world=self.world if now - self.world.get('stamp', 0) < 3 else {}, model=self.model_health, events=list(self.events),
                 cameras={k:now-v[0]<2 for k,v in self.images.items()},

@@ -2,6 +2,7 @@
 import argparse
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import signal
@@ -10,7 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import stack
@@ -25,6 +26,7 @@ class LauncherCheck(unittest.TestCase):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
+        (self.root / 'web/.local/session.json').write_text(json.dumps({'token': 'fixture-token'}))
         # Exercise the real supervisor and lock with harmless stand-ins for ROS/models.
         self.harness = self.root / "harness.py"
         self.harness.write_text(f'''
@@ -141,7 +143,7 @@ if __name__ == "__main__":
         self.addCleanup(s.control.close)
         with patch.object(s, "start") as start, patch.object(s, "ros", return_value=(
                 "/motion/get_state\n/task/list_jobs\nPublisher count: 1\n")), \
-                patch.object(s, "url", return_value=True), patch("stack.socket.socket"), \
+                patch.object(s, "url", return_value=True) as urls, patch("stack.socket.socket"), \
                 patch("stack.time.sleep", side_effect=lambda _: s.request_stop()), \
                 patch.dict(os.environ, DISPLAY=":0"), \
                 patch("stack.subprocess.run", side_effect=FileNotFoundError("xdg-open")), \
@@ -149,6 +151,7 @@ if __name__ == "__main__":
             with self.assertRaises(KeyboardInterrupt):
                 s.run()
         self.assertIn("All started", output.getvalue())
+        urls.assert_any_call('http://localhost:8766/health', ('ready', 'asr_ready'))
         self.assertIn("Open http://localhost:8088 in a browser", output.getvalue())
         names = [call.args[0] for call in start.call_args_list]
         self.assertEqual(names, ["monitor", "llm", "motion", "fake", "world", "skills", "ctrl",
@@ -156,6 +159,43 @@ if __name__ == "__main__":
         self.assertEqual(s.env["ROS_LOCALHOST_ONLY"], "1")
         self.assertEqual(s.env["WORKCELL_REAL"], "0")
         self.assertIn("use_fake_hardware:=true", start.call_args_list[2].args)
+
+    def test_http_success_does_not_imply_model_readiness(self):
+        for value, expected in (({}, False), ({'ready': True}, False),
+                                ({'ready': True, 'asr_ready': False}, False),
+                                ({'ready': True, 'asr_ready': 'false'}, False),
+                                ({'ready': True, 'asr_ready': 1}, False),
+                                ([], False), ({'ready': True, 'asr_ready': True}, True)):
+            response = MagicMock(status=200)
+            response.__enter__.return_value = response
+            response.read.return_value = json.dumps(value).encode()
+            with self.subTest(value=value), patch('stack.urllib.request.urlopen', return_value=response):
+                self.assertEqual(stack.Stack.url('http://fixture/health', ('ready', 'asr_ready')), expected)
+        response.read.return_value = b'not JSON'
+        with patch('stack.urllib.request.urlopen', return_value=response):
+            self.assertFalse(stack.Stack.url('http://fixture/health', ('ready',)))
+        with patch('stack.urllib.request.urlopen', side_effect=OSError('not listening')):
+            self.assertFalse(stack.Stack.url('http://fixture/health', ('ready',)))
+
+    def test_web_readiness_uses_authenticated_state_and_waits_for_session(self):
+        args = argparse.Namespace(sim=True, mode='debug', rviz=False, no_gui=True, perception='yolo26')
+        s = stack.Stack(self.root, args)
+        self.addCleanup(s.control.close)
+        with patch.object(s, 'url', return_value=False) as probe:
+            self.assertFalse(s.web_ready())
+        request, flags = probe.call_args.args
+        self.assertEqual(request.full_url, 'http://localhost:8088/api/state')
+        self.assertEqual(request.get_header('X-workcell-token'), 'fixture-token')
+        self.assertEqual(flags, ('ready',))
+        session = self.root / 'web/.local/session.json'
+        for content in (None, 'not JSON', '{}', '[]', '{"token": null}', '{"token": ""}'):
+            if content is None:
+                session.unlink()
+            else:
+                session.write_text(content)
+            with self.subTest(content=content), patch.object(s, 'url') as probe:
+                self.assertFalse(s.web_ready())
+                probe.assert_not_called()
 
     def test_hardware_launch_forwards_either_camera_model_without_starting_two_sources(self):
         for backend in ('yolo26','yolo11'):

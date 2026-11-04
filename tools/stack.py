@@ -1,6 +1,7 @@
 """Start and supervise the workcell, or stop the supervisor in this checkout."""
 import argparse
 import fcntl
+import json
 import os
 from pathlib import Path
 import signal
@@ -123,12 +124,28 @@ class Stack:
             return ""
 
     @staticmethod
-    def url(url):
+    def url(url, flags=()):
         try:
             with urllib.request.urlopen(url, timeout=2) as response:
-                return response.status == 200
-        except (OSError, urllib.error.URLError):
+                if response.status != 200:
+                    return False
+                if not flags:
+                    return True
+                value = json.load(response)
+                return isinstance(value, dict) and all(value.get(key) is True for key in flags)
+        except (OSError, urllib.error.URLError, ValueError):
             return False
+
+    def web_ready(self):
+        try:
+            token = json.loads((self.root / 'web/.local/session.json').read_text())['token']
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+        if not isinstance(token, str) or not token:
+            return False
+        request = urllib.request.Request('http://localhost:8088/api/state',
+                                         headers={'X-Workcell-Token': token})
+        return self.url(request, ('ready',))
 
     def run(self):
         # Refuse occupied endpoints before a readiness probe can accept a different stack.
@@ -162,10 +179,10 @@ class Stack:
         self.start("demo-ui", sys.executable, "tools/vacuum_demo_ui.py")
         self.wait_for("Gemma", 180, lambda: self.url("http://localhost:8770/health"))
         self.start("speech", "pixi", "run", "--locked", "-e", "models", "speech")
-        self.wait_for("speech server", 180, lambda: self.url("http://localhost:8766/health"))
+        self.wait_for("speech server", 180, lambda: self.url("http://localhost:8766/health", ('ready', 'asr_ready')))
         self.start("chat", sys.executable, "conversation/bridge.py")
         self.start("web", sys.executable, "web/gateway.py")
-        self.wait_for("web app", 30, lambda: self.url("http://localhost:8088"))
+        self.wait_for("web app", 30, self.web_ready)
         self.wait_for("vacuum demo page", 20, lambda: self.url("http://localhost:8765/status"))
         print("All started. Web: http://localhost:8088 | Vacuum demo: http://localhost:8765\n"
               "Logs: pixi run logs | Stop: Ctrl+C or pixi run down", flush=True)
